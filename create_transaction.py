@@ -14,7 +14,7 @@ class Vin(object):
 	def __init__(self, addr, sequence = b"FFFFFFFF"):
 		self.addr = addr
 
-	def from_txid(self):
+	def from_which_txid(self):
 		pass
 		
 	def scriptSig(self):
