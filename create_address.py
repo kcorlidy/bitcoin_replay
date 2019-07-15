@@ -26,7 +26,7 @@ def MoNscript(m, n, publickeylist):
 	# P2WSH calls witnessScript, P2SH calls redeemScript
 	# Be careful the order of publickeylist, which will change your address. Then redeem unsuccessfully
 	if isinstance(publickeylist, list) or isinstance(publickeylist, tuple)\
-		and (isinstance(m, int) and isinstance(n) and m <= n and m > 0):
+		and (isinstance(m, int) and isinstance(n) and m <= n and m >= 1):
 		m += 50
 		n += 50
 		start = [bytes.fromhex("{}".format(m))]
