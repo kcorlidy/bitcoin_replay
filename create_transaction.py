@@ -2,12 +2,20 @@ from pyhdwallet import Base58
 from hashlib import sha256
 from binascii import hexlify
 import ecdsa
+import time
 
 info = ["m/44'/0'/0'/0/0", # path
  '1HnA8fYPskppWonizo8v1owqjBDMviz5Zh', # addr
  '02707f1e1a0e1ea7ba8ce83710604304fa85f995b6b0d15ff752cf70602cf4757e', #pub
  '5f5b55e76d05be90bdd523483386b8d418412dbe04dd398155c486319fb260f8', #pri
  'KzR58Tj1WkLvMJmyZzt3P4KTLJpv2tn7xK32nfHGNq9Ffw8WLUEc'] # wif
+
+
+SIGHASH = {
+	"ALL": 0x01,
+	"None": 0x02,
+	"SINGLE": 0x03
+}
 
 
 def tobig_endian(value):
@@ -26,20 +34,24 @@ def tolittle_endian(value):
 	rev = ["".join(i) for i in list(zip(a,b))][::-1]
 	return "".join(rev)
 
-
 class Vin(object):
 	"""
-		:param pubkey:
-		:param pre_txid:
-		:param sequence:
-		:param mon:
+		:param key:
+		:param tx: 			raw transaction, txid
+		:param sequence:	default FFFFFFFF
+		:param mon:			default None, means signle sig
+		:param sighash:		default SIGHASH_ALL
 		
 	"""
-	def __init__(self, pubkey, pre_txid, vout, sequence = b"FFFFFFFF", mon=(-1, -1)):
-		self.pubkey = pubkey
-		self.seq = sequence # or 0
-		self.pre_txid = tolittle_endian(pre_txid)
-		self.vout = self.hexvout(vout)
+	def __init__(self, key, tx, 
+				sequence = b"FFFFFFFF", mon = None, sighash = SIGHASH.get("ALL")):
+		self.key = key
+		self.tx = tx if len(tx) > 64 else self._load_previous_tx_info(tx)
+
+		self.seq = sequence
+		self.mon = mon
+		self.SIGHASH = sighash
+
 		self.count = 0
 
 	def hexvout(self, vout):
@@ -62,8 +74,48 @@ class Vin(object):
 
 		return hexlify(b"".join(start)).decode()
 
-	def scriptSig(self, prikey, msg):
+	def _load_previous_tx_info(self):
 		pass
+
+	def _load_key(self, public = False):
+		if not public:
+			types = ecdsa.SigningKey
+			key = [pri for pri,pub in self.key] if isinstance(key, list) else self.key[0]
+		else:
+			types = ecdsa.VerifyingKey
+			key = [pub for pri,pub in self.key] if isinstance(key, list) else self.key[1]
+
+		sk = (types.from_string(key) 
+					if not isinstance(key, list) 
+					else [ecdsa.SigningKey.from_string(_key) for _key in key]
+				 )
+		return sk
+
+	def _sign(self, msg):
+		dsha256 = sha256(sha256(msg).digest()).digest()
+		sk = self._load_key()
+		return sk.sign(dsha256, sigencode=ecdsa.util.sigencode_der)
+
+	def extract_rs(self, sig):
+		r_p = int(sig[6:8], 16) * 2 + 8
+		r = sig[8:r_p]
+		s_p = int(sig[2+r_p:4+r_p], 16) * 2 + 12
+		s = sig[s_p:r_p+s_p]
+		return int(r, 16), int(s, 16)
+
+	def verify(self, msg, sig):
+		msg = sha256(sha256(msg).digest()).digest() if len(msg) != 64 else msg
+		vk = self._load_key()
+		return vk.verify(sig, msg, sigdecode=ecdsa.util.sigdecode_der)
+
+	def scriptSig(self):
+		if mon and len(mon) == 2:
+			# multisig
+			m, n = mon
+
+		else:
+			# single sig
+			pass
 
 	def txinwitness(self, siglist, redeemscript):
 		self._txinwitness = siglist + [redeemscript]
@@ -73,8 +125,9 @@ class Vin(object):
 
 class Vout(object):
 	"""docstring for Vout"""
-	def __init__(self, addr):
+	def __init__(self, addr, coin):
 		self.addr = addr # p2pkh p2sh etc.
+		self.coin = self.coindec2coinhex(coin)
 		self.count = 0
 
 	def scriptcode(self):
@@ -90,16 +143,10 @@ class Vout(object):
 
 		script_type = script_type.lower()
 
-		if script_type == "p2pkh":
+		if script_type in ["p2pkh", "p2wpkh"]:
 			pass
 
-		elif script_type == "p2sh":
-			pass
-
-		elif script_type == "p2wpkh":
-			pass
-
-		elif script_type == "p2wsh":
+		elif script_type in ["p2sh", "p2wsh"]:
 			pass
 
 		elif script_type == "bech32_p2pkh":
@@ -123,7 +170,7 @@ class Vout(object):
 
 class transaction(object):
 	"""docstring for transaction"""
-	def __init__(self, vin_info, vout_info, locktime, version = b'01000000'):
+	def __init__(self, vin_info, vout_info, locktime = 0, version = b'01000000'):
 		self._version = version
 		self._vin = [Vin(**vins) for vins in vin_info]
 		self._vout = [Vout(**vouts) for vouts in _vout_info]
@@ -137,4 +184,12 @@ class transaction(object):
 		pass
 
 	def initialize(self):
+		pass
+
+	@property
+	def print_json(self):
+		pass
+
+	@property
+	def print_raw(self):
 		pass
