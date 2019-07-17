@@ -3,6 +3,10 @@ from hashlib import sha256
 from binascii import hexlify
 import ecdsa
 import time
+import calendar
+from opcodes import OPCODE_LIST
+from functools import partial
+
 
 info = ["m/44'/0'/0'/0/0", # path
  '1HnA8fYPskppWonizo8v1owqjBDMviz5Zh', # addr
@@ -17,22 +21,53 @@ SIGHASH = {
 	"SINGLE": 0x03
 }
 
-
 def tobig_endian(value):
-	if len(value) != 10:
-		raise RuntimeError("invalid value length")
+
 	a = value[::2]
 	b = value[::-2][::-1]
 	rev = ["".join(i) for i in list(zip(a,b))][::-1]
 	return "".join(rev)
 
 def tolittle_endian(value):
-	if len(value) != 10:
-		raise RuntimeError("invalid value length")
+
 	a = value[::2]
 	b = value[::-2][::-1]
 	rev = ["".join(i) for i in list(zip(a,b))][::-1]
 	return "".join(rev)
+
+def _load_key(self, public = False):
+	if not public:
+		types = ecdsa.SigningKey
+		key = [pri for pri,pub in self.key] if isinstance(key, list) else self.key[0]
+	else:
+		types = ecdsa.VerifyingKey
+		key = [pub for pri,pub in self.key] if isinstance(key, list) else self.key[1]
+
+	sk = (types.from_string(key) 
+			if not isinstance(key, list) 
+			else [ecdsa.SigningKey.from_string(_key) for _key in key]
+			 )
+	return sk
+
+
+def _load_tx_info(txid):
+		pass
+
+
+def calculate_zvalue(tx_now, tx_bef):
+	# load two transaction
+	tx_now = tx_now if len(tx_now) != 64 else _load_tx_info(tx_now)
+	tx_bef = tx_bef if len(tx_bef) != 64 else _load_tx_info(tx_bef)
+
+	# clean the now one
+
+	# add previous transaction vout info into cleaned transaction
+
+	# double sha256
+		
+	return tx_now
+
+_hex = lambda x: hex(x)[2:]
 
 class Vin(object):
 	"""
@@ -43,16 +78,15 @@ class Vin(object):
 		:param sighash:		default SIGHASH_ALL
 		
 	"""
-	def __init__(self, key, tx, 
-				sequence = b"FFFFFFFF", mon = None, sighash = SIGHASH.get("ALL")):
+	def __init__(self, key, tx_unspent, 
+				sequence = b"FFFFFFFF", mon = None, sighash = SIGHASH.get("ALL"), **kwargs):
 		self.key = key
-		self.tx = tx if len(tx) > 64 else self._load_previous_tx_info(tx)
-
+		self.tx_unspent = tx_unspent
 		self.seq = sequence
 		self.mon = mon
 		self.SIGHASH = sighash
-
 		self.count = 0
+		super().__init__(**kwargs)
 
 	def hexvout(self, vout):
 		return tolittle_endian(format(vout, "##010x")[2:])
@@ -74,66 +108,57 @@ class Vin(object):
 
 		return hexlify(b"".join(start)).decode()
 
-	def _load_previous_tx_info(self):
-		pass
-
-	def _load_key(self, public = False):
-		if not public:
-			types = ecdsa.SigningKey
-			key = [pri for pri,pub in self.key] if isinstance(key, list) else self.key[0]
-		else:
-			types = ecdsa.VerifyingKey
-			key = [pub for pri,pub in self.key] if isinstance(key, list) else self.key[1]
-
-		sk = (types.from_string(key) 
-					if not isinstance(key, list) 
-					else [ecdsa.SigningKey.from_string(_key) for _key in key]
-				 )
-		return sk
 
 	def _sign(self, msg):
-		dsha256 = sha256(sha256(msg).digest()).digest()
+		
+		calculate_zvalue(tx_unspent)
+
 		sk = self._load_key()
 		return sk.sign(dsha256, sigencode=ecdsa.util.sigencode_der)
 
-	def extract_rs(self, sig):
-		r_p = int(sig[6:8], 16) * 2 + 8
-		r = sig[8:r_p]
-		s_p = int(sig[2+r_p:4+r_p], 16) * 2 + 12
-		s = sig[s_p:r_p+s_p]
-		return int(r, 16), int(s, 16)
 
-	def verify(self, msg, sig):
-		msg = sha256(sha256(msg).digest()).digest() if len(msg) != 64 else msg
-		vk = self._load_key()
-		return vk.verify(sig, msg, sigdecode=ecdsa.util.sigdecode_der)
+	def multisig(self, msg):
+		pass
 
-	def scriptSig(self):
-		if mon and len(mon) == 2:
-			# multisig
-			m, n = mon
+	def scriptSig(self, witness = False):
+		if not witness:
+			if mon and len(mon) == 2:
+				# multisig
+				m, n = mon
 
-		else:
-			# single sig
+			else:
+				# single sig
+				pass
+
+			return
+
+		if witness == "P2WPKH nested in BIP16 P2SH":
 			pass
+		elif witness == "P2WSH nested in BIP16 P2SH":
+			pass
+		elif witness == "P2WPKH":
+			pass
+		elif witness == "P2WSH":
+			pass
+		else:
+			raise RuntimeError("invalid witness type")
+
+		return
 
 	def txinwitness(self, siglist, redeemscript):
 		self._txinwitness = siglist + [redeemscript]
 
-	def initialize(self):
-		pass
 
 class Vout(object):
-	"""docstring for Vout"""
-	def __init__(self, addr, coin):
+	"""
+
+	"""
+	def __init__(self, addr, coin, **kwargs):
 		self.addr = addr # p2pkh p2sh etc.
 		self.coin = self.coindec2coinhex(coin)
 		self.count = 0
 
-	def scriptcode(self):
-		pass
-
-	def vout_n(self):
+	def vout_number(self):
 		# counter.
 		count = self.count
 		self.count += 1
@@ -141,20 +166,23 @@ class Vout(object):
 
 	def scriptPubKey(self, pubkey, script_type):
 
-		script_type = script_type.lower()
+		script_type = self.addr[0]
 
-		if script_type in ["p2pkh", "p2wpkh"]:
+		if script_type == "1":
+			# P2PKH, P2WPKH, P2WPKHoP2SH
 			pass
 
-		elif script_type in ["p2sh", "p2wsh"]:
+		elif script_type == "3":
+			# P2SH, P2WSH, P2WSHoP2SH 
 			pass
 
-		elif script_type == "bech32_p2pkh":
-			pass
-
-		elif script_type == "bech32_p2sh":
-			pass
-
+		elif script_type == "b":
+			if len(script_type) <= 34:
+				# P2PKH
+				pass
+			else:
+				# P2SH
+				pass
 		else:
 			raise RuntimeError()
 
@@ -164,20 +192,33 @@ class Vout(object):
 		_hex = hex(dec)[2:]
 		return tolittle_endian(_hex)
 
-	def initialize(self):
+		
+class Transaction(Vin, Vout):
+	"""
+
+	"""
+	def __init__(self, locktime = 0, version = b'01000000', **kwargs):
+		super().__init__(**kwargs)
+		self._version = version
+		self._locktime = self.locktime(locktime)
+		self._load_key = partial(_load_key, self)
+
+
+	def create_rawtx(self):
 		pass
 
+	def extract_rs(self, sig):
+		r_p = int(sig[6:8], 16) * 2 + 8
+		r = sig[8:r_p]
+		s_p = int(sig[2+r_p:4+r_p], 16) * 2 + 12
+		s = sig[s_p:r_p+s_p]
+		return int(r, 16), int(s, 16)
 
-class transaction(object):
-	"""docstring for transaction"""
-	def __init__(self, vin_info, vout_info, locktime = 0, version = b'01000000'):
-		self._version = version
-		self._vin = [Vin(**vins) for vins in vin_info]
-		self._vout = [Vout(**vouts) for vouts in _vout_info]
-		self._locktime = self.locktime(locktime)
+	def verify(self, msg, sig):
+		vk = self._load_key()
+		return vk.verify(sig, msg, sigdecode=ecdsa.util.sigdecode_der)
 
-
-	def locktime(self):
+	def locktime(self, locktime):
 		pass
 
 	def txid(self):
@@ -193,3 +234,10 @@ class transaction(object):
 	@property
 	def print_raw(self):
 		pass
+
+
+if __name__ == '__main__':
+	txid_ = tolittle_endian("01000000")
+	print(txid_)
+	tx = Transaction(key = 1, tx_unspent = 1, addr="133", coin=1)
+	print(tx.__dict__)
