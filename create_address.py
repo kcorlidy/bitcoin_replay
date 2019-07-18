@@ -31,14 +31,15 @@ def MoNscript(m, n, publickeylist):
 		n += 50
 		start = [bytes.fromhex("{}".format(m))]
 		for pk in publickeylist:
-			start += [bytes.fromhex("21"), pk if isinstance(pk, bytes) else bytes.fromhex(pk)]
+			pk = pk if isinstance(pk, bytes) else bytes.fromhex(pk)
+			start += [bytes.fromhex(hex(len(pk))[2:]), pk]
 		start += [bytes.fromhex("{}".format(n)), bytes.fromhex("ae")]
 	else:
 		raise NotImplementedError("Can not handle your input")
 
 	return hexlify(b"".join(start)).decode()
 
-def P2SH(redeemScript = None ,testnet = False):
+def P2SH(redeemScript ,testnet = False):
 	prefix = b"\xc4" if testnet else b"\x05"
 	hash_again = hashlib.new('ripemd160', sha256(redeemScript).digest()).digest()
 	return Base58.check_encode(prefix + hash_again) 
@@ -62,8 +63,8 @@ def P2WPKH(pk, testnet = False):
 
 def P2WSHoP2SHAddress(witnessScript, testnet = False):
 	prefix = b"\xc4" if testnet else b"\x05"
-	hashs = bytes.fromhex("0020") + sha256(witnessScript).digest()
-	hash_again = hashlib.new("ripemd160",  sha256(hashs).digest()).digest()
+	redeemScript = bytes.fromhex("0020") + sha256(witnessScript).digest()
+	hash_again = hashlib.new("ripemd160",  sha256(redeemScript).digest()).digest()
 	return Base58.check_encode(prefix + hash_again) 
 
 if __name__ == '__main__':
@@ -93,3 +94,5 @@ if __name__ == '__main__':
 
 	publickeylist = ["021e6617e06bb90f621c3800e8c37ab081a445ae5527f6c5f68a022e7133f9b5fe", "03bea1a8ce6369435bb74ff1584a136a7efeebfe4bc320b4d59113c92acd869f38", "0280631b27700baf7d472483fadfe1c4a7340a458f28bf6bae5d3234312d684c65"]
 	assert MoNscript(2,3,publickeylist) == "5221021e6617e06bb90f621c3800e8c37ab081a445ae5527f6c5f68a022e7133f9b5fe2103bea1a8ce6369435bb74ff1584a136a7efeebfe4bc320b4d59113c92acd869f38210280631b27700baf7d472483fadfe1c4a7340a458f28bf6bae5d3234312d684c6553ae"
+
+	print(P2SH(bytes.fromhex("a82073d83ecabab6ba96a47f03d0e21ffbdfeaab5d337b7e93a0cc2e85019190fb3f87"), testnet=True))

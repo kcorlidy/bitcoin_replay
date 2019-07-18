@@ -1,12 +1,15 @@
-from pyhdwallet import Base58
-from hashlib import sha256
-from binascii import hexlify
 import ecdsa
 import time
 import calendar
+
+from ecdsa.ecdsa import int_to_string, string_to_int
 from opcodes import OPCODE_LIST
 from functools import partial
+from pyhdwallet import Base58
+from hashlib import sha256
+from binascii import hexlify
 
+OPCODE_DICT = { k:hex(v)[2:] for k,v in dict(OPCODE_LIST).items()}
 
 info = ["m/44'/0'/0'/0/0", # path
  '1HnA8fYPskppWonizo8v1owqjBDMviz5Zh', # addr
@@ -53,6 +56,8 @@ def _load_key(self, public = False):
 def _load_tx_info(txid):
 		pass
 
+def dsha256(msg):
+	return sha256(sha256(msg).digest()).digest()
 
 def calculate_zvalue(tx_now, tx_bef):
 	# load two transaction
@@ -109,19 +114,9 @@ class Vin(object):
 		return hexlify(b"".join(start)).decode()
 
 
-	def _sign(self, msg):
-		
-		calculate_zvalue(tx_unspent)
-
-		sk = self._load_key()
-		return sk.sign(dsha256, sigencode=ecdsa.util.sigencode_der)
-
-
-	def multisig(self, msg):
-		pass
-
 	def scriptSig(self, witness = False):
 		if not witness:
+			
 			if mon and len(mon) == 2:
 				# multisig
 				m, n = mon
@@ -134,12 +129,16 @@ class Vin(object):
 
 		if witness == "P2WPKH nested in BIP16 P2SH":
 			pass
+
 		elif witness == "P2WSH nested in BIP16 P2SH":
 			pass
+
 		elif witness == "P2WPKH":
 			pass
+
 		elif witness == "P2WSH":
 			pass
+
 		else:
 			raise RuntimeError("invalid witness type")
 
@@ -164,19 +163,22 @@ class Vout(object):
 		self.count += 1
 		return count
 
-	def scriptPubKey(self, pubkey, script_type):
+	def scriptPubKey(self):
 
 		script_type = self.addr[0]
 
 		if script_type == "1":
-			# P2PKH, P2WPKH, P2WPKHoP2SH
-			pass
+			b58_dec = hexlify(Base58.check_decode(self.addr)).decode()
+			code = [OPCODE_DICT.get(c) for c in ["OP_DUP", "OP_HASH160", "OP_EQUALVERIFY", "OP_CHECKSIG"]]
+			return "{}{}{}".format(code[0] + code[1], len(b58_dec), b58_dec + code[2] + code[3])
 
 		elif script_type == "3":
-			# P2SH, P2WSH, P2WSHoP2SH 
-			pass
+			b58_dec = hexlify(Base58.check_decode(self.addr)).decode()
+			code = [OPCODE_DICT.get(c) for c in ["OP_HASH160", "OP_EQUAL"]]
+			return "{}{}{}".format(code[0] + code[1], len(b58_dec), b58_dec + code[2] + code[3])
 
 		elif script_type == "b":
+			raise NotImplementedError("TODO: witness")
 			if len(script_type) <= 34:
 				# P2PKH
 				pass
@@ -204,8 +206,18 @@ class Transaction(Vin, Vout):
 		self._load_key = partial(_load_key, self)
 
 
-	def create_rawtx(self):
-		pass
+	def create_rawtransaction(self):
+		tx_raw = ""
+		z = calculate_zvalue(self.tx_unspent, self.tx_raw)
+
+
+		return z, tx_raw
+
+
+	def sign_transaction(self, z):
+		
+		sk = self._load_key()
+		return sk.sign(z, sigencode=ecdsa.util.sigencode_der)
 
 	def extract_rs(self, sig):
 		r_p = int(sig[6:8], 16) * 2 + 8
@@ -214,15 +226,34 @@ class Transaction(Vin, Vout):
 		s = sig[s_p:r_p+s_p]
 		return int(r, 16), int(s, 16)
 
-	def verify(self, msg, sig):
+
+
+	def check_recovery(self, pub):
+		padx = (b'\0'*32 + int_to_string(pub.pubkey.point.x()))[-32:]
+		if pub.pubkey.point.y() & 1:
+			ck = b'\3'+padx
+		else:
+			ck = b'\2'+padx
+	
+		scriptPubKey = hashlib.new("ripemd160", sha256(ck).digest()).hexdigest() 
+
+		return scriptPubKey, hexlify(ck)
+
+	def recovery_pubkey(self, r, s, z):
+		pubkey = ecdsa.VerifyingKey.from_public_key_recovery(
+			signature=signature, data=data, curve=curve, sigdecode=ecdsa.util.sigdecode_der)
+		scriptPubKey_PubKeyhash = [ hexlify(pub) for pub in pubkey]
+		return 
+
+	def verify(self, z, sig):
 		vk = self._load_key()
-		return vk.verify(sig, msg, sigdecode=ecdsa.util.sigdecode_der)
+		return vk.verify(sig, z, sigdecode=ecdsa.util.sigdecode_der)
 
 	def locktime(self, locktime):
 		pass
 
-	def txid(self):
-		pass
+	def txid(self, txhex):
+		return hexlify(dsha256(txhex)[::-1])
 
 	def initialize(self):
 		pass
@@ -237,7 +268,6 @@ class Transaction(Vin, Vout):
 
 
 if __name__ == '__main__':
-	txid_ = tolittle_endian("01000000")
-	print(txid_)
-	tx = Transaction(key = 1, tx_unspent = 1, addr="133", coin=1)
-	print(tx.__dict__)
+	ds = dsha256(bytes.fromhex("0100000001d4c705db4bb9676e639c24262576dde43cac6d8933eed2d225afe732bf9450180000000017a9149f9995e4dedfc5eab94774f425ad9395197e75ec87ffffffff01004c174d1349020017a91455b074958c10742436c9ce0bfc533f440956305f870000000001000000"))
+	print(hexlify(ds)) # a4cdc40b2f89603275753f24559fa4007cf4222b9bd95fd76465f541f47e681f
+	# spk a9 14 9f9995e4dedfc5eab94774f425ad9395197e75ec 87
