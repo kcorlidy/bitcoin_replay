@@ -118,6 +118,7 @@ OPCODE_LIST = [
 for i in range(1, 76):
     OPCODE_LIST.append(("OP_PUSH_%d" % i, i))
 
+OPCODE_DICT = { k:hex(v)[2:] for k,v in dict(OPCODE_LIST).items()}
 
 """
 Enumerate the opcodes of the Bitcoin VM.
