@@ -4,10 +4,13 @@ import calendar
 
 from ecdsa.ecdsa import int_to_string, string_to_int
 from functools import partial
+from binascii import hexlify
 from hashlib import sha256
 from serialize import serialize_tx, deserialize_tx 
-from . import tobig_endian, tobig_endian, _load_key, _load_tx_info, OPCODE_DICT
-
+from vin import  Vin
+from vout import Vout
+from opcodes import OPCODE_DICT
+from func import tolittle_endian, _load_tx_info, _load_key, dsha256
 
 
 info = ["m/44'/0'/0'/0/0", # path
@@ -17,12 +20,7 @@ info = ["m/44'/0'/0'/0/0", # path
  'KzR58Tj1WkLvMJmyZzt3P4KTLJpv2tn7xK32nfHGNq9Ffw8WLUEc'] # wif
 
 
-SIGHASH = {
-	"ALL": 0x01,
-	"None": 0x02,
-	"SINGLE": 0x03
-}
-		
+	
 class Transaction(Vin, Vout):
 	"""
 

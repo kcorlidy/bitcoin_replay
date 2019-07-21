@@ -1,5 +1,7 @@
 from binascii import hexlify
-from . import tolittle_endian, OPCODE_DICT
+from func import tolittle_endian
+from opcodes import OPCODE_DICT
+from sighash import SIGHASH
 
 class Vin(object):
 	"""

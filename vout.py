@@ -1,5 +1,6 @@
 from pyhdwallet import Base58
-from . import tolittle_endian, OPCODE_DICT
+from func import tolittle_endian
+from opcodes import OPCODE_DICT
 from binascii import hexlify
 
 class Vout(object):
