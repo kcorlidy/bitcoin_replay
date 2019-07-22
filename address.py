@@ -43,9 +43,10 @@ def P2SH(redeemScript ,testnet = False):
 	hash_again = hashlib.new('ripemd160', sha256(redeemScript).digest()).digest()
 	return Base58.check_encode(prefix + hash_again) 
 
-def P2WSH(pk, testnet = False):
-	pk = b"\x21" + pk + b"\xac" if pk[0] in [2, 3] else pk # single key
-	pk_added_code = bytes.fromhex('0020') + sha256(pk).digest()
+def P2WSH(witnessScript, testnet = False):
+	# witnessScript for P2WSH is special, be careful.
+	witnessScript = b"\x21" + witnessScript + b"\xac" if witnessScript[0] in [2, 3] else witnessScript # single key
+	pk_added_code = bytes.fromhex('0020') + sha256(witnessScript).digest()
 	hrp = "bc" if not testnet else "tb"
 	l = list(bytearray(pk_added_code))
 	l0 = l[0] - 0x50 if l[0] else 0

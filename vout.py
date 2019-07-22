@@ -1,4 +1,4 @@
-from pyhdwallet import Base58
+import Base58
 from func import tolittle_endian
 from opcodes import OPCODE_DICT
 from binascii import hexlify
