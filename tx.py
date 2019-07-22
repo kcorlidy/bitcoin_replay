@@ -6,9 +6,7 @@ from ecdsa.ecdsa import int_to_string, string_to_int
 from functools import partial
 from binascii import hexlify
 from hashlib import sha256
-from serialize import serialize_tx, deserialize_tx 
-from vin import  Vin
-from vout import Vout
+from serialize import tx, witness_tx 
 from opcodes import OPCODE_DICT
 from func import tolittle_endian, _load_tx_info, _load_key, dsha256
 
@@ -21,36 +19,21 @@ info = ["m/44'/0'/0'/0/0", # path
 
 
 	
-class Transaction(Vin, Vout):
+class Transaction(object):
 	"""
 
 	"""
-	def __init__(self, locktime = 0, version = b'01000000', **kwargs):
+	def __init__(self,  **kwargs):
 		super().__init__(**kwargs)
-		self._version = version
-		self._locktime = self.locktime(locktime)
 		self._load_key = partial(_load_key, self)
 
-
-	def create_rawtransaction(self):
-		tx_raw = ""
-		z = serialize_tx(self.tx_unspent, self.tx_raw)
-
-		return z, tx_raw
-
-	def sign_transaction(self, z):
+	def sign_transaction(self, key, msg):
 		
-		sk = self._load_key()
-		return sk.sign(z, sigencode=ecdsa.util.sigencode_der)
-
-	def extract_rs(self, sig):
-		r_p = int(sig[6:8], 16) * 2 + 8
-		r = sig[8:r_p]
-		s_p = int(sig[2+r_p:4+r_p], 16) * 2 + 12
-		s = sig[s_p:r_p+s_p]
-		return int(r, 16), int(s, 16)
+		sk = _load_key(key)
+		return sk.sign(msg, sigencode=ecdsa.util.sigencode_der)
 
 	def check_recovery(self, pub):
+
 		padx = (b'\0'*32 + int_to_string(pub.pubkey.point.x()))[-32:]
 		if pub.pubkey.point.y() & 1:
 			ck = b'\3'+padx
@@ -61,29 +44,17 @@ class Transaction(Vin, Vout):
 
 		return scriptPubKey, hexlify(ck)
 
-	def recovery_pubkey(self, r, s, z):
+	def recovery_pubkey(self, signature, msg):
+
 		pubkey = ecdsa.VerifyingKey.from_public_key_recovery(
-			signature=signature, data=data, curve=curve, sigdecode=ecdsa.util.sigdecode_der)
+			signature=signature, data=msg, curve=curve, sigdecode=ecdsa.util.sigdecode_der)
 		scriptPubKey_PubKeyhash = [ hexlify(pub) for pub in pubkey]
 		return 
 
-	def verify(self, z, sig):
-		vk = self._load_key()
-		return vk.verify(sig, z, sigdecode=ecdsa.util.sigdecode_der)
+	def verify(self, key, msg, sig):
 
-	def locktime(self, locktime):
-		pass
-
-	def txid(self, txhex):
-		return hexlify(dsha256(txhex)[::-1])
-
-	@property
-	def print_json(self):
-		pass
-
-	@property
-	def print_raw(self):
-		pass
+		vk = _load_key(key, public = True)
+		return vk.verify(sig, msg, sigdecode=ecdsa.util.sigdecode_der)
 
 
 if __name__ == '__main__':
