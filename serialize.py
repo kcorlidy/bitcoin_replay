@@ -10,8 +10,10 @@ from sighash import SIGHASH
 from binascii import hexlify as _hexlify
 from hashlib import sha256
 from functools import partial
+from collections import OrderedDict
+from json import dumps, loads
 
-_hex = lambda x: hex()[2:]
+_hex = lambda x: hex(int(x))[2:]
 hexlify = lambda x: _hexlify(x).decode()
 
 # ordinary scriptPubKey
@@ -91,8 +93,8 @@ class tx(object):
 	"""
 	def __init__(self, inputs, ouputs, locktime = 0, seq = 4294967295, version = 2):
 		self.ver = tolittle_endian(version)
-		self.inputs = [{}]
-		self.ouputs = [{}]
+		self.inputs = inputs
+		self.outputs = ouputs
 		self.locktime = tolittle_endian(locktime)
 		self.seq = tolittle_endian(seq)
 
@@ -118,24 +120,6 @@ class tx(object):
 		return hexlify(b"".join(start)).decode()
 
 
-	@classmethod
-	def Script(self, script, addr_type = P2WPKH):
-
-		addr_type = addr_type.upper()
-
-		if len(script) >= 34:
-			head = script[0]
-		else:
-			raise RuntimeError("Are you should it is your address? Its length less than 34")
-
-		if head in ["1","3","b", # mainnet
-					"m","2","t", # testnet
-					"0","5" # public key or MoNscript
-				   ]:
-			return addr_type(script)
-
-		else:
-			raise RuntimeError("Only supported bitcoin mainnet(testnet) address")
 
 	def check_inputs(self):
 		"""
@@ -162,7 +146,8 @@ class tx(object):
 				_input["prev_txid"] = tolittle_endian(prev_txid)
 				_input["prev_vout"] = tolittle_endian(prev_vout, 2)
 			else:
-				raise RuntimeError(":prev_txid string 32bytes: :prev_txid int:")
+				print(prev_txid, prev_vout)
+				raise RuntimeError(":prev_txid string 32bytes: :prev_vout int:")
 
 			pubkey = _input.get("pubkey")
 			redeemscript = _input.get("redeemscript")
@@ -224,15 +209,15 @@ class tx(object):
 	def check_outputs(self):
 		"""
 			:address str:
-			:amont int:
+			:amount int:
 		"""
 		for _output in self.outputs:
 
 			address = _output.get("address")
-			amont = _output.get("amont")
+			amount = _output.get("amount")
 
-			if amont < 0:
-				raise RuntimeError("Amont can not be negative")
+			if amount < 0:
+				raise RuntimeError("amount can not be negative")
 
 			if not address:
 				raise RuntimeError("Address can not be empty")
@@ -279,10 +264,10 @@ class tx(object):
 		hex_output += vin_count
 
 		for output_ in self.outputs:
-			amont = output_.get("amont")
+			amount = tolittle_endian(output_.get("amount"), 16)
 			scriptpubkey = output_.get("scriptpubkey")
 
-			hex_output += amont + _hex(len(scriptpubkey)/2) + scriptpubkey
+			hex_output += amount + _hex(len(scriptpubkey)/2) + scriptpubkey
 
 		return self.ver + hex_input + hex_output + self.locktime
 
@@ -314,6 +299,55 @@ class tx(object):
 		# double sha256
 			
 		return tx_now
+
+	@classmethod
+	def json(self, txhex):
+		if txhex[8:12] == "0001":
+			raise RuntimeError("Don't support witness transaction for now.")
+
+		version = txhex[:8]
+		locktime = txhex[-8:]
+		txhex = txhex[8:-8]
+
+		vin_count = txhex[:2]
+		txhex = txhex[2:]
+
+		inputs = []
+		for _ in range(int(vin_count)):
+			__input = OrderedDict()
+			__input["prev_txid"] = txhex[:64]
+			__input["prev_vout"] = txhex[64:72]
+			__input["script_length"] = txhex[72:74]
+			l = 74 + int(__input["script_length"], 16) * 2
+			__input["script"] = txhex[74:l]
+			__input["sequence"] = txhex[l:l+8]
+			inputs.append(__input)
+			txhex = txhex[l+8:]
+
+		vout_count = txhex[:2]
+		txhex = txhex[2:]
+		outputs = []
+		for _ in range(int(vout_count)):
+			__output = OrderedDict()
+			__output["amount"] = txhex[:16]
+			__output["script_length"] = txhex[16:18]
+			l = 18 + int(__output["script_length"], 16) * 2
+			__output["scriptpubkey"] = txhex[18:l]
+			outputs.append(__output)
+			txhex = txhex[l:]
+
+		tx_json = OrderedDict(
+			version = version,
+			vin_count = vin_count,
+			vin = inputs,
+			vout_count = vout_count,
+			vout = outputs,
+			locktime = locktime
+
+		)
+
+		return dumps(tx_json,  indent = 4)
+
 
 class witness_tx(tx):
 	"""
@@ -403,7 +437,13 @@ if __name__ == '__main__':
 	'''
 	assert P2WSH()
 	'''
-	inputs = [{"address":"","pubkey":[],"prev_txid":"","prev_vout":1}]
-	outputs = [{"address":"","amont":1}]
+	inputs = [{ "address":"tb1qm3e067l5aadlmr07qg05rudd05m3vmw2606rzj",
+				"pubkey":["039e84846f40570adc5cef6904e10d9f5a5dadb9f2afd07cc9aad188d769c50b46"],
+				"prev_txid":"9e84846f40570adc5cef6904e10d9f5a5dadb9f2afd07cc9aad188d769c50b46",
+				"prev_vout":1}]
+	outputs = [{"address":"tb1qm3e067l5aadlmr07qg05rudd05m3vmw2606rzj","amount":1}]
 	tx_ = tx(inputs, outputs)
 	tx_raw = tx_.createrawtransaction()
+	
+	
+	# print(tx.json("02000000010cefbc7f0250945ba8888328486167ee83cde1a2e40ed27b780dde2e692219d3000000006a4730440220324b3acd694df487710c46096e7f49ed09c275ae536be2f8bb9dd0a0d9a60da10220194c898879d63b5c8e3930de7070831acd99e871614ddbc08958d57f17936ecf012103a9ef51cecb3c2066e394b5ac4671ef3cae9a45032dcfc6903e4df8a783037dd8feffffff0264f700000000000017a9146141931080ebc9461d52f3ce9ea54a7f35bec2278750ea3800000000001976a914d259038d23c4a8f9dd4eaaf92316d191f18d963788ac18f00800"))
