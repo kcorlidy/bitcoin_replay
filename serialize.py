@@ -1,4 +1,6 @@
 import hashlib
+import warnings
+import re
 
 from Base58 import check_decode, check_encode
 from segwit_addr import decode, encode
@@ -7,6 +9,7 @@ from opcodes import OPCODE_DICT
 from sighash import SIGHASH
 from binascii import hexlify as _hexlify
 from hashlib import sha256
+from functools import partial
 
 _hex = lambda x: hex()[2:]
 hexlify = lambda x: _hexlify(x).decode()
@@ -88,8 +91,8 @@ class tx(object):
 	"""
 	def __init__(self, inputs, ouputs, locktime = 0, seq = 4294967295, version = 2):
 		self.ver = tolittle_endian(version)
-		self.inputs = {}
-		self.ouputs = {}
+		self.inputs = [{}]
+		self.ouputs = [{}]
 		self.locktime = tolittle_endian(locktime)
 		self.seq = tolittle_endian(seq)
 
@@ -97,7 +100,7 @@ class tx(object):
 	def MoNscript(self, m, n, publickeylist):
 		
 		if isinstance(publickeylist, list) or isinstance(publickeylist, tuple) \
-			and (isinstance(m, int) and isinstance(n) and m <= n and m >= 2) \
+			and (isinstance(m, int) and isinstance(n) and m <= n and n >= 2 and m >= 1) \
 			and len(publickeylist) == n:
 			m += 80
 			n += 80
@@ -110,7 +113,7 @@ class tx(object):
 			start += [bytes.fromhex(_hex(n)),
 						 bytes.fromhex(OPCODE_DICT.get("OP_CHECKMULTISIG"))]
 		else:
-			raise NotImplementedError("Can not handle your input")
+			raise NotImplementedError("Can not handle your input. Condition: n >= 2, m >=1, m <= n, length(publickeylist) == n")
 
 		return hexlify(b"".join(start)).decode()
 
@@ -134,15 +137,154 @@ class tx(object):
 		else:
 			raise RuntimeError("Only supported bitcoin mainnet(testnet) address")
 
+	def check_inputs(self):
+		"""
+			address
+			address_type(option) P2SH P2SH(P2WSH) P2SH(P2WPKH) P2PKH P2WSH P2WPKH
+			redeemscript(option, multisig, redeemscript and mon must have one)
+			mon(option, for multisig, tuple)
+			:pubkey list:
+			:prikey(option):
+			locktime(option)
+			sequence(option)
+			prev_txid
+			prev_vout
+		"""
+		for _input in self.inputs:
+			locktime = _input.get("locktime")
+			self.locktime = tolittle_endian(locktime) if locktime and locktime > 0 and isinstance(locktime, int) else self.locktime
+
+			sequence = _input.get("sequence")
+			self.seq = tolittle_endian(sequence) if sequence and sequence > 0 and isinstance(sequence, int) else self.seq
+				
+			prev_txid, prev_vout = _input.get("prev_txid"), _input.get("prev_vout")
+			if prev_txid and prev_vout and isinstance(prev_vout, int) and len(prev_txid) == 64:
+				_input["prev_txid"] = tolittle_endian(prev_txid)
+				_input["prev_vout"] = tolittle_endian(prev_vout, 2)
+			else:
+				raise RuntimeError(":prev_txid string 32bytes: :prev_txid int:")
+
+			pubkey = _input.get("pubkey")
+			redeemscript = _input.get("redeemscript")
+			mon = _input.get("mon")
+			
+			if not pubkey or not isinstance(pubkey, list):
+				raise RuntimeError("pubkey is necessary. And it must be in a list")
+
+			elif len(pubkey) > 1 and not redeemscript:
+
+				if not isinstance(mon, tuple):	
+					raise RuntimeError("redeemscript is necessary when using multisig")
+
+				elif mon[0] <= mon[1] and mon[1] > 2:
+					_input["redeemscript"] == self.MoNscript(mon[0], mon[1], pubkey)
+
+			elif len(pubkey) == 1 and redeemscript:
+				warnings.warn("redeemscript should not exit when using single signature", RuntimeError)
+			
+			elif len(pubkey) == 1 and mon:
+				warnings.warn("mon should not exit when using single signature", RuntimeError)
+			
+			address = _input.get("address")
+			if not address or not isinstance(address, str):
+				raise RuntimeError("address is necessary. And it must be a string")
+
+			elif not _input.get("address_type"):
+				# analysis what kind of address it is.
+
+				if re.findall(r"^[3,2]", address) and len(pubkey) > 1:
+					# P2SH or P2SH(P2WSH)
+					if not redeemscript:
+						warnings.warn("P2SH or P2SH(P2WSH), not sure, but has set to P2SH(P2WSH)[default]")
+					
+					elif re.findall(r"^(0020)", redeemscript):
+						_input["address_type"] = "P2SH(P2WSH)"
+
+					else:
+						_input["address_type"] = "P2SH"
+
+				elif re.findall(r"^[3,2]", address) and len(pubkey) == 1:
+					# P2SH(P2WPKH)
+					_input["address_type"] = "P2SH(P2WPKH)"
+
+				elif re.findall(r"^[1,m]", address):
+					# P2PKH
+					_input["address_type"] = "P2PKH"
+
+				elif re.findall(r"^(bc|tb)", address) and len(pubkey) > 1:
+					# P2WSH
+					_input["address_type"] = "P2WSH"
+
+				elif re.findall(r"^(bc|tb)", address) and len(pubkey) == 1:
+					# P2WPKH
+					_input["address_type"] = "P2WPKH"
+
+		return True
+
+	def check_outputs(self):
+		"""
+			:address str:
+			:amont int:
+		"""
+		for _output in self.outputs:
+
+			address = _output.get("address")
+			amont = _output.get("amont")
+
+			if amont < 0:
+				raise RuntimeError("Amont can not be negative")
+
+			if not address:
+				raise RuntimeError("Address can not be empty")
+
+			elif re.findall(r"^[3,2]", address):
+				_output["scriptpubkey"] = P2SH(address)
+
+			elif re.findall(r"^[1,m]", address):
+				_output["scriptpubkey"] = P2PKH(address)
+
+			elif re.findall(r"^(bc|tb)", address) and len(address) == 42:
+				_output["scriptpubkey"] = P2WPKH(address)
+
+			elif re.findall(r"^(bc|tb)", address) and len(address) == 42:
+				_output["scriptpubkey"] = P2WSH(address)
+
+		return True
+
 	def createrawtransaction(self):
-		pass
 
-	def serialize(self):
-		pass
+		if not (self.check_inputs() and self.check_outputs()):
+			# check input and output, if failed, over.
+			return
 
-	@classmethod
-	def createScriptPubkey(self, value, script_type):
-		pass
+	
+		hex_input = ""
+
+		vin_count = tolittle_endian(len(self.inputs), 2)
+		hex_input += vin_count
+
+		for num, input_ in enumerate(self.inputs):
+			prev_txid = input_.get("prev_txid")
+			prev_vout = input_.get("prev_vout")
+
+			# script_length, signature, sighash_type, pubkey
+			script_blank = "{%s}"%num
+			sequence = self.seq
+
+			hex_input += prev_txid +  prev_vout  + script_blank + sequence
+		
+		hex_output = ""
+
+		vout_count = tolittle_endian(len(self.outputs), 2)
+		hex_output += vin_count
+
+		for output_ in self.outputs:
+			amont = output_.get("amont")
+			scriptpubkey = output_.get("scriptpubkey")
+
+			hex_output += amont + _hex(len(scriptpubkey)/2) + scriptpubkey
+
+		return self.ver + hex_input + hex_output + self.locktime
 
 	def embed_scriptsig(self):
 		pass
@@ -187,15 +329,13 @@ class witness_tx(tx):
 	def createrawtransaction(self):
 		pass
 
-	def serialize(self):
-		pass
 
 	def embed_witness(self):
 		pass
 
 	@classmethod
-	def createScriptPubkey(self, value, script_type):
-		result = super().createScriptPubkey(value, script_type)
+	def createScriptPubkey(self, value, addr_type):
+		result = super().Script(value, addr_type)
 		if result:
 			return result
 
@@ -263,3 +403,7 @@ if __name__ == '__main__':
 	'''
 	assert P2WSH()
 	'''
+	inputs = [{"address":"","pubkey":[],"prev_txid":"","prev_vout":1}]
+	outputs = [{"address":"","amont":1}]
+	tx_ = tx(inputs, outputs)
+	tx_raw = tx_.createrawtransaction()

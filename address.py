@@ -38,6 +38,13 @@ def MoNscript(m, n, publickeylist):
 
 	return hexlify(b"".join(start)).decode()
 
+def P2PKH(pubkey, testnet = False):
+	addressversion = b'\x00' if not testnet else b'\x6f'
+	Identifier =  hashlib.new('ripemd160', sha256(pubkey).digest()).digest()
+	vh160 = addressversion + Identifier
+	return Base58.check_encode(vh160)
+
+
 def P2SH(redeemScript ,testnet = False):
 	prefix = b"\xc4" if testnet else b"\x05"
 	hash_again = hashlib.new('ripemd160', sha256(redeemScript).digest()).digest()
@@ -89,7 +96,7 @@ if __name__ == '__main__':
 	P2WSHoP2SHAddress_ = "3CYkk3x1XUvdXCdHtRFdjMjp17PuJ8eR8z"
 	assert P2WSHoP2SHAddress(witnessScript = P2WSHoP2SHAddress_witnessScript) == P2WSHoP2SHAddress_
 
-	# need a standard data 51..51ae might be changed now, i think
+	# need a standard data, 51..51ae might be changed now, i think
 	redeemScript_single = "5141042f90074d7a5bf30c72cf3a8dfd1381bdbd30407010e878f3a11269d5f74a58788505cdca22ea6eab7cfb40dc0e07aba200424ab0d79122a653ad0c7ec9896bdf51ae"
 	redeemScript_single = bytes.fromhex(redeemScript_single)
 	single_P2SH_address = "3P14159f73E4gFr7JterCCQh9QjiTjiZrG"
@@ -102,3 +109,6 @@ if __name__ == '__main__':
 
 	publickeylist = ["021e6617e06bb90f621c3800e8c37ab081a445ae5527f6c5f68a022e7133f9b5fe", "03bea1a8ce6369435bb74ff1584a136a7efeebfe4bc320b4d59113c92acd869f38", "0280631b27700baf7d472483fadfe1c4a7340a458f28bf6bae5d3234312d684c65"]
 	assert MoNscript(2,3,publickeylist) == "5221021e6617e06bb90f621c3800e8c37ab081a445ae5527f6c5f68a022e7133f9b5fe2103bea1a8ce6369435bb74ff1584a136a7efeebfe4bc320b4d59113c92acd869f38210280631b27700baf7d472483fadfe1c4a7340a458f28bf6bae5d3234312d684c6553ae"
+
+	pk = "02fa84946ba062ea6cadf77561ca8859ef1de8edf6dd0bf91f516b770c84135b60"
+	assert P2PKH(bytes.fromhex(pk)) == "1DksSA9vNRbpG6etkDoWkqVHBfj8HmtyL9"
