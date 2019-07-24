@@ -12,6 +12,8 @@ from hashlib import sha256
 from functools import partial
 from collections import OrderedDict
 from json import dumps, loads
+from pprint import pprint
+from address import P2WSHoP2SHAddress
 
 _hex = lambda x: hex(int(x))[2:]
 hexlify = lambda x: _hexlify(x).decode()
@@ -117,7 +119,7 @@ class tx(object):
 		else:
 			raise NotImplementedError("Can not handle your input. Condition: n >= 2, m >=1, m <= n, length(publickeylist) == n")
 
-		return hexlify(b"".join(start)).decode()
+		return hexlify(b"".join(start))
 
 
 
@@ -144,7 +146,7 @@ class tx(object):
 			prev_txid, prev_vout = _input.get("prev_txid"), _input.get("prev_vout")
 			if prev_txid and prev_vout and isinstance(prev_vout, int) and len(prev_txid) == 64:
 				_input["prev_txid"] = tolittle_endian(prev_txid)
-				_input["prev_vout"] = tolittle_endian(prev_vout, 2)
+				_input["prev_vout"] = tolittle_endian(prev_vout, 8)
 			else:
 				print(prev_txid, prev_vout)
 				raise RuntimeError(":prev_txid string 32bytes: :prev_vout int:")
@@ -162,7 +164,7 @@ class tx(object):
 					raise RuntimeError("redeemscript is necessary when using multisig")
 
 				elif mon[0] <= mon[1] and mon[1] > 2:
-					_input["redeemscript"] == self.MoNscript(mon[0], mon[1], pubkey)
+					_input["redeemscript"] = self.MoNscript(mon[0], mon[1], pubkey)
 
 			elif len(pubkey) == 1 and redeemscript:
 				warnings.warn("redeemscript should not exit when using single signature", RuntimeError)
@@ -180,29 +182,40 @@ class tx(object):
 				if re.findall(r"^[3,2]", address) and len(pubkey) > 1:
 					# P2SH or P2SH(P2WSH)
 					if not redeemscript:
-						warnings.warn("P2SH or P2SH(P2WSH), not sure, but has set to P2SH(P2WSH)[default]")
-					
+
+						check_redeemscript_again = _input.get("redeemscript")
+
+						if check_redeemscript_again and P2WSHoP2SHAddress(bytes.fromhex(check_redeemscript_again)) == _input["address"]:
+							_input["address_type"] = P2WSHoP2SH
+
+						elif check_redeemscript_again:
+							_input["address_type"] = P2SH
+
+						else:
+							_input["address_type"] = P2WSHoP2SH
+							warnings.warn("P2SH or P2SH(P2WSH), not sure, but has set to P2SH(P2WSH)[default]")
+						
 					elif re.findall(r"^(0020)", redeemscript):
-						_input["address_type"] = "P2SH(P2WSH)"
+						_input["address_type"] = P2WSHoP2SH
 
 					else:
-						_input["address_type"] = "P2SH"
+						_input["address_type"] = P2SH
 
 				elif re.findall(r"^[3,2]", address) and len(pubkey) == 1:
 					# P2SH(P2WPKH)
-					_input["address_type"] = "P2SH(P2WPKH)"
+					_input["address_type"] = P2WPKHoP2SH
 
 				elif re.findall(r"^[1,m]", address):
 					# P2PKH
-					_input["address_type"] = "P2PKH"
+					_input["address_type"] = P2PKH
 
 				elif re.findall(r"^(bc|tb)", address) and len(pubkey) > 1:
 					# P2WSH
-					_input["address_type"] = "P2WSH"
+					_input["address_type"] = P2WSH
 
 				elif re.findall(r"^(bc|tb)", address) and len(pubkey) == 1:
 					# P2WPKH
-					_input["address_type"] = "P2WPKH"
+					_input["address_type"] = P2WPKH
 
 		return True
 
@@ -231,13 +244,15 @@ class tx(object):
 			elif re.findall(r"^(bc|tb)", address) and len(address) == 42:
 				_output["scriptpubkey"] = P2WPKH(address)
 
-			elif re.findall(r"^(bc|tb)", address) and len(address) == 42:
+			elif re.findall(r"^(bc|tb)", address) and len(address) > 42:
 				_output["scriptpubkey"] = P2WSH(address)
 
 		return True
 
 	def createrawtransaction(self):
-
+		
+		# raise RuntimeError("can not handle multisig yet")
+		
 		if not (self.check_inputs() and self.check_outputs()):
 			# check input and output, if failed, over.
 			return
@@ -261,7 +276,7 @@ class tx(object):
 		hex_output = ""
 
 		vout_count = tolittle_endian(len(self.outputs), 2)
-		hex_output += vin_count
+		hex_output += vout_count
 
 		for output_ in self.outputs:
 			amount = tolittle_endian(output_.get("amount"), 16)
@@ -301,7 +316,7 @@ class tx(object):
 		return tx_now
 
 	@classmethod
-	def json(self, txhex):
+	def decoderawtransaction(self, txhex):
 		if txhex[8:12] == "0001":
 			raise RuntimeError("Don't support witness transaction for now.")
 
@@ -317,17 +332,41 @@ class tx(object):
 			__input = OrderedDict()
 			__input["prev_txid"] = txhex[:64]
 			__input["prev_vout"] = txhex[64:72]
-			__input["script_length"] = txhex[72:74]
-			l = 74 + int(__input["script_length"], 16) * 2
-			__input["script"] = txhex[74:l]
+			txhex = txhex[72:]
+
+			__input["script_length"] = tolittle_endian(re.findall(r"(\w{2,8})(?=4730|4830|4930)", txhex)[0])
+			
+			sll = len(__input["script_length"]) # script_length length
+
+			# script length
+			sl = int(__input["script_length"], 16) * 2
+			sl = sl if sl <= 3500 else int(__input["script_length"][-2:], 16) * 2 
+			# Something it using an odd number, for example `fdfd00004730..` and the real size of script is `fd` or less than `fd` one or two bytes
+			# 3428 should be the maximum of script_length, (16/16)
+			# 16 signature(each length <=49), monscript(1byte to m, 1byte to n, 16*(66+2)bytes to public key)
+
+			if sl > 220:
+				# multisig
+				regex = r"(?=4730|4830|4930)\w{%s,%s}ae"%(sl-6,sl)
+				__input["script"] = re.findall(regex, txhex)[0]
+				print(regex, __input["script"])
+				l = sll + len( __input["script"])
+
+			else:
+				# non-multisig
+				l = sll + sl
+				__input["script"] = txhex[sl:l]
+
 			__input["sequence"] = txhex[l:l+8]
 			inputs.append(__input)
 			txhex = txhex[l+8:]
+		
+		
 
 		vout_count = txhex[:2]
 		txhex = txhex[2:]
 		outputs = []
-		for _ in range(int(vout_count)):
+		for _ in range(int(vout_count, 16)):
 			__output = OrderedDict()
 			__output["amount"] = txhex[:16]
 			__output["script_length"] = txhex[16:18]
@@ -349,31 +388,76 @@ class tx(object):
 		return dumps(tx_json,  indent = 4)
 
 
+
+
 class witness_tx(tx):
 	"""
 		version + maker + flag + inputs + outputs + witness + locktime = tx
 	"""
 
-	def __init__(self, inputs, ouputs, witness, maker = 0, flag = 1, **kw):
-		super(normal_tx, self).__init__(inputs, ouputs, **kw)
+	def __init__(self, inputs, ouputs, witness = None, maker = 0, flag = 1, **kw):
+		super(witness_tx, self).__init__(inputs, ouputs, **kw)
 		self.maker = tolittle_endian(maker, 2)
 		self.flag = tolittle_endian(flag, 2)
-		self.witness = {}
+		self.witness = witness
+
+	@classmethod
+	def createscript(self, value):
+		func_ = value.get("address_type")
+		s = value.get("redeemscript") if value.get("redeemscript") else value.get("pubkey")[0]
+		s = func_(s)
+		return s if not isinstance(s, tuple) else s[0]
 
 	def createrawtransaction(self):
-		pass
+		# raise RuntimeError("can not handle multisig yet")
+		
+		if not (self.check_inputs() and self.check_outputs()):
+			# check input and output, if failed, over.
+			return
+	
+		hex_input = ""
+
+		vin_count = tolittle_endian(len(self.inputs), 2)
+		hex_input += vin_count
+
+		for num, input_ in enumerate(self.inputs):
+			prev_txid = input_.get("prev_txid")
+			prev_vout = input_.get("prev_vout")
+
+			# script_length, signature, sighash_type, pubkey
+			script = self.createscript(input_)
+
+			for _ in range(2):
+				script = _hex(len(script)/2) + script
+
+			sequence = self.seq
+
+			if input_.get("address_type") in [P2SH, P2PKH]:
+				script_blank = "{%s}"%num
+				hex_input += prev_txid +  prev_vout  + script_blank + sequence
+			else:
+				hex_input += prev_txid +  prev_vout  + script + sequence
+		
+		hex_output = ""
+
+		vout_count = tolittle_endian(len(self.outputs), 2)
+		hex_output += vout_count
+
+		for output_ in self.outputs:
+			amount = tolittle_endian(output_.get("amount"), 16)
+			scriptpubkey = output_.get("scriptpubkey")
+
+			hex_output += amount + _hex(len(scriptpubkey)/2) + scriptpubkey
+
+		witness_blank = "{}"*len(self.inputs)
+
+		return self.ver + self.maker + self.flag + hex_input + hex_output + witness_blank + self.locktime
+
 
 
 	def embed_witness(self):
 		pass
 
-	@classmethod
-	def createScriptPubkey(self, value, addr_type):
-		result = super().Script(value, addr_type)
-		if result:
-			return result
-
-		return
 
 	def serialize_tx(tx_now, tx_bef):
 		# load two transaction
@@ -400,6 +484,10 @@ class witness_tx(tx):
 		# double sha256
 			
 		return tx_now
+
+	@classmethod
+	def decoderawtransaction(self, txhex):
+		pass
 
 
 
@@ -434,9 +522,14 @@ if __name__ == '__main__':
 	
 	
 	assert P2WPKH("tb1qm3e067l5aadlmr07qg05rudd05m3vmw2606rzj") == "0014dc72fd7bf4ef5bfd8dfe021f41f1ad7d37166dca"
-	'''
-	assert P2WSH()
-	'''
+	
+	# Data from 9988eaabbcf5976d13f91c28604f921239ed3fadf4592d1a0a0e288b419a78a4
+	key = "5221035c8e83fa4ca1d74d10f122daaac69b006e5c02a1594b78907881190500b1f22a2102c1235301c06e94bdd44c248e6c824b58fafea3ceee4db2857402e322486046842103e46359fd20b25a7be466984f156084be0dead32e4e99cec2e0f7c9ad4863daaa53ae"
+	assert P2WSH(key) == "0020d3124de88d90949cf90ed655bfd306f00d9473387eedc59d819d51bc6880f29d"
+	assert P2WSH("bc1qm2pz5342a0n3ctv9hm6s568zeye8cw7j90j0nmjdwkrcy78qs2nsfyp945") == "0020da822a46aaebe71c2d85bef50a68e2c9327c3bd22be4f9ee4d75878278e082a7"
+	
+	
+	# Data from , ordinary only
 	inputs = [{ "address":"tb1qm3e067l5aadlmr07qg05rudd05m3vmw2606rzj",
 				"pubkey":["039e84846f40570adc5cef6904e10d9f5a5dadb9f2afd07cc9aad188d769c50b46"],
 				"prev_txid":"9e84846f40570adc5cef6904e10d9f5a5dadb9f2afd07cc9aad188d769c50b46",
@@ -445,5 +538,20 @@ if __name__ == '__main__':
 	tx_ = tx(inputs, outputs)
 	tx_raw = tx_.createrawtransaction()
 	
+	# Data from ef7c7e3beafa9246f7454f457d75abf1f86606f8ceeb41877a5729dc659dfb74, witness only
+	inputs = [{ "address":"3JXRVxhrk2o9f4w3cQchBLwUeegJBj6BEp",
+				"pubkey":[	"029103d1dfbbee9ea5249ee0b03ca59e08291ce34a7467513edf8ea767b5aa2638",
+							"03dce07bea5905a1c3e70f86c1f74f0e98e7cf3b6f5d02226a4c531c9e930c613b",
+							"0268d8878afaf4b55118519d8520fe0db27f9596a812d4378f4bf4a96a53336946"],
+				"prev_txid":"2b00918a833e5307ced62aa173b71f4120b0a691e71ae8bbc2e7e3408fb161fe",
+				"prev_vout":3,
+				"mon":(2,3)
+				}] 
+	outputs = [{"address":"3JXRVxhrk2o9f4w3cQchBLwUeegJBj6BEp","amount":146647479},
+			   {"address":"1FAWNMVNxmDeuCRtTex79B5S3fsXXgv1Ja","amount":13197062}]
+	tx_w = witness_tx(inputs, outputs)
+	txw_raw = tx_w.createrawtransaction()
 	
-	# print(tx.json("02000000010cefbc7f0250945ba8888328486167ee83cde1a2e40ed27b780dde2e692219d3000000006a4730440220324b3acd694df487710c46096e7f49ed09c275ae536be2f8bb9dd0a0d9a60da10220194c898879d63b5c8e3930de7070831acd99e871614ddbc08958d57f17936ecf012103a9ef51cecb3c2066e394b5ac4671ef3cae9a45032dcfc6903e4df8a783037dd8feffffff0264f700000000000017a9146141931080ebc9461d52f3ce9ea54a7f35bec2278750ea3800000000001976a914d259038d23c4a8f9dd4eaaf92316d191f18d963788ac18f00800"))
+	
+	# Data from dfb40fbf72c8fa9b11c67ba24f12bc48ba2a26f08bd709a3a11ca9ae30323a3f, witness&ordinary
+	
