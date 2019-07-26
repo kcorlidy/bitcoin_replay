@@ -550,7 +550,6 @@ class witness_tx(tx):
 	@classmethod
 	def decoderawtransaction(self, txhex):
 
-
 		if not txhex[8:12] == "0001":
 			raise RuntimeError("This is not witness transaction")
 
@@ -614,24 +613,30 @@ class witness_tx(tx):
 
 
 		txwitness = []
-		for _ in range(len(vin_count)):
+		for _ in range(int(vin_count)):
 			witness_list = []
 			witness_count = txhex[:2]
 
+			if not txhex:
+				# vin count <= witness count
+				break
+			
 			witness_count_int = int(witness_count, 16)
+			
 			if witness_count_int > 2:
 				# multisig
-				OP_0 = txhex[2:4]
+				OP_0 = txhex[2:4] # necessary
 				txhex = txhex[4:]
 
 				witness_list.append(OP_0)
 				witness_count_int -= 1
 
 			elif witness_count_int == 0:
-				witness_count_int = int(txhex[4:6], 16)
-				txhex = txhex[6:]
+				# Placeholder, watch dfb40fbf72c8fa9b11c67ba24f12bc48ba2a26f08bd709a3a11ca9ae30323a3f.test_tx
+				txhex = txhex[2:]
+				continue
 
-			else:
+			elif witness_count_int == 2:
 				# one sig
 				txhex = txhex[2:]
 
