@@ -364,8 +364,8 @@ class tx(object):
 		inputs = []
 		for _ in range(int(vin_count)):
 			__input = OrderedDict()
-			__input["prev_txid"] = txhex[:64]
-			__input["prev_vout"] = txhex[64:72]
+			__input["prev_txid"] = tolittle_endian(txhex[:64])
+			__input["prev_vout"] = tolittle_endian(txhex[64:72])
 			txhex = txhex[72:]
 			
 			# fd + 2bytes length if length > fc. fdfd00 -> length = fd
@@ -549,7 +549,119 @@ class witness_tx(tx):
 
 	@classmethod
 	def decoderawtransaction(self, txhex):
-		pass
+
+
+		if not txhex[8:12] == "0001":
+			raise RuntimeError("This is not witness transaction")
+
+		version = txhex[:8]
+		maker = txhex[8:10]
+		flag = txhex[10:12]
+		locktime = txhex[-8:]
+		txhex = txhex[12:-8]
+
+		vin_count = txhex[:2]
+		txhex = txhex[2:]
+
+		inputs = []
+		for _ in range(int(vin_count)):
+			__input = OrderedDict()
+			__input["prev_txid"] = tolittle_endian(txhex[:64])
+			__input["prev_vout"] = tolittle_endian(txhex[64:72])
+			txhex = txhex[72:]
+			
+			# fd + 2bytes length if length > fc. fdfd00 -> length = fd
+			# sl -> script length
+			if re.findall(r"^fd\w+", txhex):
+				__input["script_length"] = txhex[:6]
+				sl = int(tolittle_endian(__input["script_length"][2:]), 16) * 2
+
+			else:
+				__input["script_length"] = txhex[:2]
+				sl = int(__input["script_length"], 16) * 2
+
+			# the length of script_length
+			sll = len(__input["script_length"])
+			
+
+			if sl >= 20000:
+				print(__input["script_length"])
+				raise RuntimeError("script length is too long")
+
+			__input["script"] = txhex[sll:sll+sl]
+
+			if 0 <= sl < 134:
+				# just scriptpubkey or empty, only witness can do that
+				__input["txwitness"] = 1
+			
+			l = sll+sl
+		
+			__input["sequence"] = txhex[l:l+8]
+			inputs.append(__input)
+			txhex = txhex[l+8:]
+
+		vout_count = txhex[:2]
+		txhex = txhex[2:]
+		outputs = []
+		for _ in range(int(vout_count, 16)):
+			__output = OrderedDict()
+			__output["amount"] = txhex[:16]
+			__output["script_length"] = txhex[16:18]
+			l = 18 + int(__output["script_length"], 16) * 2
+			__output["scriptpubkey"] = txhex[18:l]
+			outputs.append(__output)
+			txhex = txhex[l:]
+
+
+		txwitness = []
+		for _ in range(len(vin_count)):
+			witness_list = []
+			witness_count = txhex[:2]
+
+			witness_count_int = int(witness_count, 16)
+			if witness_count_int > 2:
+				# multisig
+				OP_0 = txhex[2:4]
+				txhex = txhex[4:]
+
+				witness_list.append(OP_0)
+				witness_count_int -= 1
+
+			elif witness_count_int == 0:
+				witness_count_int = int(txhex[4:6], 16)
+				txhex = txhex[6:]
+
+			else:
+				# one sig
+				txhex = txhex[2:]
+
+			for _ in range(witness_count_int):
+				length_int = int(txhex[:2], 16) * 2
+				witness_list.append(txhex[2: length_int + 2])
+				txhex = txhex[length_int + 2:]
+
+			txwitness.append(witness_list)
+		
+		txwitness = txwitness[::-1]
+
+		for inp in inputs:
+			if inp.get("txwitness"):
+				inp["txwitness"] = txwitness[-1]
+				txwitness.pop()
+
+		tx_json = OrderedDict(
+			version = version,
+			maker = maker,
+			flag = flag,
+			vin_count = vin_count,
+			vin = inputs,
+			vout_count = vout_count,
+			vout = outputs,
+			locktime = locktime
+
+		)
+
+		return dumps(tx_json,  indent = 4)
 
 
 
@@ -660,4 +772,5 @@ if __name__ == '__main__':
 			   {"address":"38Se3yi7qJt36747ZtLJDFKcVN6G1nPrGw","amount":35642}]
 	tx_w = witness_tx(inputs, outputs)
 	txw_raw_wo = tx_w.createrawtransaction()
-	print(tolittle_endian("39f2761a0b08b7a8577dad5f31526839fb79b7cbe6be0832250b8a1d7c0f245e"))
+	
+	

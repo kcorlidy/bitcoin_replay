@@ -79,5 +79,127 @@ txhex = "010000000757cf6cfca66399f560fc68fab76c53c020db7b1320e8653343d8825f22add
 dec = decodetx(txhex)
 txhex = "010000000177802a5b8d19874c71b6a78fed12a9ab09c9499e25b149d23c9928c81c03e01700000000fc0047304402201345a1e4d42f665bb36371916f261b6a191b5ab1b73f8978abfcbd9fc9f7bc2502202956f5db9f486f720d7c29d9e6d8ef4bc4d9653fe17cc42dce9fa1b46f912336014730440220725702bb55866da4693de6268fa3558e0faa0dc92de07146b9bf2d719f7838ee02205908211e4e803f586028d06c8b4617ff533b5c8c1aaa821a0062d8aef3e3a9b8014c695221038bbb29a8c3872a4941f16765e194bd906fda0bb56cc3835ceacd8287ce543bc32103fa2f0251b687850cc544a875e92412daca35c3043f08b6cb646526e6a022b7aa2102f79358cc0456c6f4f589458b99338fa7e25a74f88ee9eb8b719cc978c0fd9cf653aeffffffff01a70b8e600000000017a914f036fa381fda40f4506d4cfbf27c9279b968e81a8700000000"
 txhex = "010000000177802a5b8d19874c71b6a78fed12a9ab09c9499e25b149d23c9928c81c03e01700000000fd86020047304402201345a1e4d42f665bb36371916f261b6a191b5ab1b73f8978abfcbd9fc9f7bc2502202956f5db9f486f720d7c29d9e6d8ef4bc4d9653fe17cc42dce9fa1b46f9123360147304402201345a1e4d42f665bb36371916f261b6a191b5ab1b73f8978abfcbd9fc9f7bc2502202956f5db9f486f720d7c29d9e6d8ef4bc4d9653fe17cc42dce9fa1b46f912336014730440220725702bb55866da4693de6268fa3558e0faa0dc92de07146b9bf2d719f7838ee02205908211e4e803f586028d06c8b4617ff533b5c8c1aaa821a0062d8aef3e3a9b8014c695221038bbb29a8c3872a4941f16765e194bd906fda0bb56cc3835ceacd8287ce543bc32103fa2f0251b687850cc544a875e92412daca35c3043f08b6cb646526e6a022b7aa2102f79358cc0456c6f4f589458b99338fa7e25a74f88ee9eb8b719cc978c0fd9cf653aeffffffff01a70b8e600000000017a914f036fa381fda40f4506d4cfbf27c9279b968e81a8700000000"
-print(dec)
-print(tolittle_endian("0143")) # if scriptsig >= fd(i.e.fdfe00) then transform to fd(mean long scriptsig) + 4***bytes***(little-endian) + 00(OP_0)(might be option)
+
+# if scriptsig >= fd(i.e.fdfe00) then transform to fd(mean long scriptsig) + 4***bytes***(little-endian) + 00(OP_0)(might be option)
+
+
+
+def decodewtx(txhex):
+
+	if not txhex[8:12] == "0001":
+		raise RuntimeError("This is not witness transaction")
+
+	version = txhex[:8]
+	maker = txhex[8:10]
+	flag = txhex[10:12]
+	locktime = txhex[-8:]
+	txhex = txhex[12:-8]
+
+	vin_count = txhex[:2]
+	txhex = txhex[2:]
+
+	inputs = []
+	for _ in range(int(vin_count)):
+		__input = OrderedDict()
+		__input["prev_txid"] = tolittle_endian(txhex[:64])
+		__input["prev_vout"] = tolittle_endian(txhex[64:72])
+		txhex = txhex[72:]
+		
+		# fd + 2bytes length if length > fc. fdfd00 -> length = fd
+		# sl -> script length
+		if re.findall(r"^fd\w+", txhex):
+			__input["script_length"] = txhex[:6]
+			sl = int(tolittle_endian(__input["script_length"][2:]), 16) * 2
+
+		else:
+			__input["script_length"] = txhex[:2]
+			sl = int(__input["script_length"], 16) * 2
+
+		# the length of script_length
+		sll = len(__input["script_length"])
+		
+
+		if sl >= 20000:
+			print(__input["script_length"])
+			raise RuntimeError("script length is too long")
+
+		__input["script"] = txhex[sll:sll+sl]
+
+		if 0 <= sl < 134:
+			# just scriptpubkey or empty, only witness can do that
+			__input["txwitness"] = 1
+		
+		l = sll+sl
+	
+		__input["sequence"] = txhex[l:l+8]
+		inputs.append(__input)
+		txhex = txhex[l+8:]
+
+	vout_count = txhex[:2]
+	txhex = txhex[2:]
+	outputs = []
+	for _ in range(int(vout_count, 16)):
+		__output = OrderedDict()
+		__output["amount"] = txhex[:16]
+		__output["script_length"] = txhex[16:18]
+		l = 18 + int(__output["script_length"], 16) * 2
+		__output["scriptpubkey"] = txhex[18:l]
+		outputs.append(__output)
+		txhex = txhex[l:]
+
+
+	txwitness = []
+	for _ in range(len(vin_count)):
+		witness_list = []
+		witness_count = txhex[:2]
+
+		witness_count_int = int(witness_count, 16)
+		if witness_count_int > 2:
+			# multisig
+			OP_0 = txhex[2:4]
+			txhex = txhex[4:]
+
+			witness_list.append(OP_0)
+			witness_count_int -= 1
+
+		elif witness_count_int == 0:
+			witness_count_int = int(txhex[4:6], 16)
+			txhex = txhex[6:]
+
+		else:
+			# one sig
+			txhex = txhex[2:]
+
+		for _ in range(witness_count_int):
+			length_int = int(txhex[:2], 16) * 2
+			witness_list.append(txhex[2: length_int + 2])
+			txhex = txhex[length_int + 2:]
+
+		txwitness.append(witness_list)
+	
+	txwitness = txwitness[::-1]
+
+	for inp in inputs:
+		if inp.get("txwitness"):
+			inp["txwitness"] = txwitness[-1]
+			txwitness.pop()
+
+	tx_json = OrderedDict(
+		version = version,
+		maker = maker,
+		flag = flag,
+		vin_count = vin_count,
+		vin = inputs,
+		vout_count = vout_count,
+		vout = outputs,
+		locktime = locktime
+
+	)
+
+	return dumps(tx_json,  indent = 4)
+
+txhex = "020000000001024a4abfb0459084b96acd93f947952b5dd09d3683be5301b6d3ecfdbf5315f2390000000000000000005e240f7c1d8a0b253208bee6cbb779fb396852315fad7d57a8b7080b1a76f2390000000000000000000260ddd10e00000000220020da822a46aaebe71c2d85bef50a68e2c9327c3bd22be4f9ee4d75878278e082a7e0457604000000001976a91491ead7abfc7ef067c022f9dfcaf97481887fee4488ac040047304402201c1861e010b9ba35cac28549ce5e6ff05f27f0155fbdda3189e3a657139b0d71022004dd0e76dfd0496a216694895dfe2374d64df250ab1a0ef684ff263f45776ee80147304402200e6246faec761ee960e9d4a3c7aab14ff2bca9cbe4462df6f21f3d6e1a49434102206bf91d1f5532fdcbea53566fadbc63e02456be33b5e92b4d9c5124934051da9b01695221035c8e83fa4ca1d74d10f122daaac69b006e5c02a1594b78907881190500b1f22a2102c1235301c06e94bdd44c248e6c824b58fafea3ceee4db2857402e322486046842103e46359fd20b25a7be466984f156084be0dead32e4e99cec2e0f7c9ad4863daaa53ae040047304402203aae818094c658a80a79544a96ebc35dfd7b48ddd6d94210a761f5306fb7ea69022041d360cd9351793094625561b999e7c2054c343fd7b4596bd1aa271235f700e301473044022045f3e032ff8c7690d6c57a3f87f11492d2dec250160c4f348027f1b021bb7b5c0220009370d7617cca3e81741bbde105771389f5e5beba6e670c0357d989755df07f016952210269c7f55bb72a79f67bc3d690b48b17653c555ce7b293bff7e9ed6bce2cede4ee2103377a3f63e70cd56c3953ea8bdfd1010d80533cd80c05457d5e2c600e5bafc4a42102141ebbdba5d8854dbe92d573d9d0be51f4aaad8b3a214cb395c1964e2538b48653ae00000000"
+decodewtx(txhex)
+
+txhex = "0200000000010848162e26e3a169041fa3a1cf5bf5f1c1cf1a27fc8a2365e0699b540417a95976000000006a4730440220100008c976faf12053bd0ebd2c20a351fa460077ee9640be011a041276820c32022051fd1cad198b9452a368b8be5fa6cfb769b3987934ee8ac13597774cb6eb0a35012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffff5c01c1d5f79754bc1a8a95d3aa82b2ddffb491437db0aabaf062ee0d6f76f2d5000000006a473044022068387342bded0e45f5ab270cf596a2e13718454d697a5b0ca1d4382357b22b88022035d0ac8604c59a19c52ab2014b2d38425ffab6ddfd20e3ea7cd30d7e80e401df012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffffb0f1aeab65c387bcd11f447d7d77ddec74ee746719fe865597cba7354f131bf1010000001716001446001892ef35d879748654b0c23997d38027e7dbfefffffff4b91772802f221bb9a40bf844c305ddbd18e199c72049e00e715313a4cab8dd000000006a47304402202987750f3c18c6ef60d8d2d360a8f9e5d24f2761ae5e1e09b171ef000b9bb6590220236a8fd02029ee10d5dc94965353a164a1db80f7b52a1dfaf7189664a4b26b3f012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffffefa0e9f99b402807f3bb6a4ee1854e0ac0d5f1047d6e61c01694453d14675c70000000006a47304402200ada30de51880310fdbb419d35e66181edd8af40daa06ea98c266bc5556e61f702203bb8504cd13171d1e193afd4b093bba9aae93dbf3e3f3bd197c211bd133346c1012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffff50cacbd976c900fdac43af8c026972e0958b0747e26b084eaeb8085554b57bc6010000006a47304402200c9376a22a409451f710f33a1c7f0e5f06e780f3427019dcaed3a511fadd876a022000ddf699416d301961bdecd7d6ffab79f2095c508d81c1bce14baca4ba4fd35c012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffff9b9bf3875889ea90581a7750ad004939bc0e3a44a92c520dbf8282e01ef17f44000000006a473044022007075a9d0b41532267ba4649dce70ab6a68e29cdc35d8cf8f44c041a73cd477802203f4a381f3c4028aedea911b07e05634e1e384b5b6de5e8e155fcb5b6e87275df012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffffa295dbc9c605059293d2dc9ba19811376637e2489de9a47264e06ba21e174570000000006a4730440220672f9b772f2363aceae036ab6d12600c2610a6f663da6a021b938568bc2745ef022038271d57b476a1235855b9090992542abd432c40edf40f7c72e34baed52d9d37012102317bd8bc51fecce3c5a2cf9fad735f2ca3bfc4045799994a43047930a12859e0feffffff02d0890e010000000017a914a2130379358e9c310e09bb872112f6443d7ccada873a8b00000000000017a9144a10cca23fe4652397912174552195b148714bc6870000024730440220746ad2f09eefcd510cd6ddaa3c5d59703a485ab02f0ad0d151bc05a876c0606c02202014830316f6fa919f4bc05e8346b2a8edca099261c427b789c3d7aa8c63d56d0121022c1b3031488e827d6f7a7ebab8fc1cf4fc1b987dce2fa8b601e0557672646a68000000000035f40800"
+print(decodewtx(txhex))
