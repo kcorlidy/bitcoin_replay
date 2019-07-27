@@ -249,7 +249,7 @@ class tx(object):
 
 		return True
 
-	def createrawtransaction(self):
+	def createrawtransaction(self, withmark = True):
 		
 		# raise RuntimeError("can not handle multisig yet")
 		
@@ -284,7 +284,13 @@ class tx(object):
 
 			hex_output += amount + _hex(len(scriptpubkey)/2) + scriptpubkey
 
-		return self.ver + hex_input + hex_output + self.locktime
+		txhex = self.ver + hex_input + hex_output + self.locktime
+
+		if withmark:
+			return txhex
+		
+		return re.sub(r"{.*?}", "{}", txhex).format(*(["00"]*int(vin_count)))
+
 
 	def scriptlength(self, value):
 		value = int(len(value) / 2)
@@ -300,7 +306,6 @@ class tx(object):
 			:info: [{"address":string, "prev_txid":string, "signature":[], "pubkey":[], "mon":[m,n], "redeemscript":string},]
 		"""
 		for ss in info:
-			_scriptsig = ""
 			signature = ss.get("address")
 			pubkey = ss.get("pubkey")
 			redeemscript = ss.get("redeemscript")
@@ -315,7 +320,7 @@ class tx(object):
 				sig = self.scriptlength(sig) + sig
 
 			elif len(pubkey) == 1:
-				sig = signature + self.scriptlength(pubkey[0]) + pubkey
+				sig = signature[0] + self.scriptlength(pubkey[0]) + pubkey
 				sig = self.scriptlength(sig) + sig
 
 			tx.format(**{"{}_{}".format(ss.get("address"), ss.get("prev_txid")):sig})
@@ -437,8 +442,10 @@ class witness_tx(tx):
 		s = func_(s)
 		return s if not isinstance(s, tuple) else s[0]
 
-	def createrawtransaction(self, addscript = True):
-		# raise RuntimeError("can not handle multisig yet")
+	def createrawtransaction(self, addscript = True, withmark = True):
+		"""
+			:addscript bool: For witness input, you can choose dont add input script(i.e. 0014dc72fd7bf4ef5bfd8dfe021f41f1ad7d37166dca)
+		"""
 		
 		if not (self.check_inputs() and self.check_outputs()):
 			# check input and output, if failed, over.
@@ -448,7 +455,7 @@ class witness_tx(tx):
 		witness_blank = ""
 		vin_count = tolittle_endian(len(self.inputs), 2)
 		hex_input += vin_count
-
+		
 		for _, input_ in enumerate(self.inputs):
 			prev_txid = input_.get("prev_txid")
 			prev_vout = input_.get("prev_vout")
@@ -468,10 +475,12 @@ class witness_tx(tx):
 			if input_.get("address_type") in [P2SH, P2PKH]:
 				script_blank = "{%s_%s}"%(input_.get("address"),prev_txid)
 				hex_input += prev_txid +  prev_vout  + script_blank + sequence
+				witness_blank += "00"
 
 			else:
 				witness_blank += "{%s_%s}"%(input_.get("address"), prev_txid)
 				hex_input += prev_txid +  prev_vout  + script + sequence
+				
 		
 		hex_output = ""
 
@@ -485,40 +494,50 @@ class witness_tx(tx):
 			hex_output += amount + _hex(len(scriptpubkey)/2) + scriptpubkey
 
 		
-		return self.ver + self.maker + self.flag + hex_input + hex_output + witness_blank + self.locktime
-
+		txhex = self.ver + self.maker + self.flag + hex_input + hex_output + witness_blank + self.locktime
+		
+		if withmark:
+			return txhex
+		
+		return re.sub(r"{.*?}", "{}", txhex).format(*(["00"]*int(vin_count)))
 
 
 	def embed_witness(self, info, tx):
 		"""
 			:info: [{"address":string, "prev_txid":string, "signature":[], "pubkey":[], "mon":[m,n], "redeemscript":string},]
 		"""
-		raise NotImplementedError
+
+		# the difference between ordinary transaction and witness transaction is 
+		# 	1. witness count
+		#	2. length of whole script(not exist in witness)
+		#	3. OP_0(necessary for multisig)
 		for ss in info:
-			_scriptsig = ""
+			witness_count = ""
 			signature = ss.get("address")
 			pubkey = ss.get("pubkey")
 			redeemscript = ss.get("redeemscript")
 			mon = ss.get("mon")
+
 			if len(pubkey) > 1 or redeemscript:
 				# multisig
 				try:
 					mon = self.MoNscript(mon[0], mon[1], pubkey) if not redeemscript else redeemscript
 				except:
 					raise RuntimeError('mon or redeemscript parameter is necessary for multisig, :info: [{"address":string, "prev_txid":string, "signature":[], "pubkey":[], "mon":[m,n], "redeemscript":string},]')
+				
+				witness_count = 1 + len(signature) + 1 # OP_0 + number of signature + script
+
 				sig = "".join(signature + [self.scriptlength(mon)] + [mon])
-				sig = self.scriptlength(sig) + sig
+				sig = _hex(witness_count) + OPCODE_DICT.get("OP_0") + sig
 
 			elif len(pubkey) == 1:
-				sig = signature + self.scriptlength(pubkey[0]) + pubkey
-				sig = self.scriptlength(sig) + sig
+
+				sig = signature[0] + self.scriptlength(pubkey[0]) + pubkey
+				sig = "02" + sig
 
 			tx.format(**{"{}_{}".format(ss.get("address"), ss.get("prev_txid")):sig})
 
 		return tx
-
-	def decoderawtransaction(self, txhex):
-		pass
 
 
 	def serialize_tx(tx_now, tx_bef):
@@ -775,7 +794,7 @@ if __name__ == '__main__':
 				}] 
 	outputs = [{"address":"3GTzAhunoaoTLEAw96sdbF6Cov6SEEKj96","amount":17730000},
 			   {"address":"38Se3yi7qJt36747ZtLJDFKcVN6G1nPrGw","amount":35642}]
-	tx_w = witness_tx(inputs, outputs)
-	txw_raw_wo = tx_w.createrawtransaction()
-	
+	tx_w = witness_tx(inputs, outputs, locktime = 586805)
+	txw_raw_wo = tx_w.createrawtransaction(withmark = False)
+	print(txw_raw_wo)
 	
