@@ -354,10 +354,15 @@ class tx(object):
 		return tx_now
 
 	@classmethod
-	def decoderawtransaction(self, txhex):
+	def decoderawtransaction(self, txhex, rev = False):
 
 		if txhex[8:12] == "0001":
 			raise RuntimeError("Don't support witness transaction for now.")
+
+		if rev:
+			f = tolittle_endian
+		else:
+			f = lambda x: x
 
 		version = txhex[:8]
 		locktime = txhex[-8:]
@@ -369,8 +374,8 @@ class tx(object):
 		inputs = []
 		for _ in range(int(vin_count)):
 			__input = OrderedDict()
-			__input["prev_txid"] = tolittle_endian(txhex[:64])
-			__input["prev_vout"] = tolittle_endian(txhex[64:72])
+			__input["prev_txid"] = f(txhex[:64])
+			__input["prev_vout"] = f(txhex[64:72])
 			txhex = txhex[72:]
 			
 			# fd + 2bytes length if length > fc. fdfd00 -> length = fd
@@ -567,10 +572,15 @@ class witness_tx(tx):
 		return tx_now
 
 	@classmethod
-	def decoderawtransaction(self, txhex):
+	def decoderawtransaction(self, txhex, rev = False):
 
 		if not txhex[8:12] == "0001":
 			raise RuntimeError("This is not witness transaction")
+
+		if rev:
+			f = tolittle_endian
+		else:
+			f = lambda x: x
 
 		version = txhex[:8]
 		maker = txhex[8:10]
@@ -584,15 +594,15 @@ class witness_tx(tx):
 		inputs = []
 		for _ in range(int(vin_count)):
 			__input = OrderedDict()
-			__input["prev_txid"] = tolittle_endian(txhex[:64])
-			__input["prev_vout"] = tolittle_endian(txhex[64:72])
+			__input["prev_txid"] = f(txhex[:64])
+			__input["prev_vout"] = f(txhex[64:72])
 			txhex = txhex[72:]
 			
 			# fd + 2bytes length if length > fc. fdfd00 -> length = fd
 			# sl -> script length
 			if re.findall(r"^fd\w+", txhex):
 				__input["script_length"] = txhex[:6]
-				sl = int(tolittle_endian(__input["script_length"][2:]), 16) * 2
+				sl = int(f(__input["script_length"][2:]), 16) * 2
 
 			else:
 				__input["script_length"] = txhex[:2]

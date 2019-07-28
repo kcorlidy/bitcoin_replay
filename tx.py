@@ -39,16 +39,14 @@ class Transaction(object):
 			ck = b'\3'+padx
 		else:
 			ck = b'\2'+padx
-	
-		scriptPubKey = hashlib.new("ripemd160", sha256(ck).digest()).hexdigest() 
 
-		return scriptPubKey, hexlify(ck)
+		return hexlify(ck)
 
 	def recovery_pubkey(self, signature, msg):
 
 		pubkey = ecdsa.VerifyingKey.from_public_key_recovery(
 			signature=signature, data=msg, curve=curve, sigdecode=ecdsa.util.sigdecode_der)
-		scriptPubKey_PubKeyhash = [ hexlify(pub) for pub in pubkey]
+		PubKeyhash = [ check_recovery(pub) for pub in pubkey]
 		return 
 
 	def verify(self, key, msg, sig):

@@ -37,6 +37,9 @@ def _load_tx_info(txid):
 		pass
 
 def dsha256(msg):
+	if isinstance(msg, str):
+		msg = bytes.fromhex(msg)
+		
 	return sha256(sha256(msg).digest()).digest()
 
 
