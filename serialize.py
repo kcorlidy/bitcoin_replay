@@ -2,18 +2,29 @@ import hashlib
 import warnings
 import re
 
-from Base58 import check_decode, check_encode
-from segwit_addr import decode, encode
-from func import tolittle_endian, tobig_endian, dsha256
-from opcodes import OPCODE_DICT
-from sighash import SIGHASH
+try:
+
+	from Base58 import check_decode, check_encode
+	from segwit_addr import decode, encode
+	from func import tolittle_endian, tobig_endian, dsha256
+	from opcodes import OPCODE_DICT
+	from sighash import SIGHASH
+	from address import P2WSHoP2SHAddress
+except:
+	from .Base58 import check_decode, check_encode
+	from .segwit_addr import decode, encode
+	from .func import tolittle_endian, tobig_endian, dsha256
+	from .opcodes import OPCODE_DICT
+	from .sighash import SIGHASH
+	from .address import P2WSHoP2SHAddress
+
 from binascii import hexlify as _hexlify
 from hashlib import sha256
 from functools import partial
 from collections import OrderedDict
 from json import dumps, loads
 from pprint import pprint
-from address import P2WSHoP2SHAddress
+
 
 _hex = lambda x: hex(int(x))[2:]
 hexlify = lambda x: _hexlify(x).decode()
@@ -38,8 +49,9 @@ def P2PKH(value):
 # witness scriptPubKey
 def P2WPKHoP2SH(pk):
 
-	check = P2SH(pk, True)
-	if check:
+	
+	if len(pk) < 66:
+		check = P2SH(pk, True)
 		return check
 
 	pk_hash = hashlib.new('ripemd160', sha256(bytes.fromhex(pk)).digest()).digest()
@@ -66,8 +78,8 @@ def P2WSH(witnessScript):
 
 def P2WSHoP2SH(witnessScript):
 
-	check = P2SH(witnessScript, True)
-	if check:
+	if len(witnessScript) < 42:
+		check = P2SH(witnessScript, True)
 		return check
 
 	redeemScript = bytes.fromhex("0020") + sha256(bytes.fromhex(witnessScript)).digest()
@@ -602,7 +614,7 @@ class witness_tx(tx):
 			# sl -> script length
 			if re.findall(r"^fd\w+", txhex):
 				__input["script_length"] = txhex[:6]
-				sl = int(f(__input["script_length"][2:]), 16) * 2
+				sl = int(tolittle_endian(__input["script_length"][2:]), 16) * 2
 
 			else:
 				__input["script_length"] = txhex[:2]
@@ -655,10 +667,16 @@ class witness_tx(tx):
 			if witness_count_int > 2:
 				# multisig
 				OP_0 = txhex[2:4] # necessary
-				txhex = txhex[4:]
 
-				witness_list.append(OP_0)
-				witness_count_int -= 1
+				if int(OP_0, 16) == 0:
+
+					txhex = txhex[4:]
+					witness_list.append(OP_0)
+					witness_count_int -= 1
+
+				else:
+					# no OP_0
+					txhex = txhex[2:]
 
 			elif witness_count_int == 0:
 				# Placeholder, watch dfb40fbf72c8fa9b11c67ba24f12bc48ba2a26f08bd709a3a11ca9ae30323a3f.test_tx
