@@ -49,7 +49,6 @@ def P2PKH(value):
 # witness scriptPubKey
 def P2WPKHoP2SH(pk):
 
-	
 	if len(pk) < 66:
 		check = P2SH(pk, True)
 		return check
