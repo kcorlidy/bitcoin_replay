@@ -383,7 +383,7 @@ class tx(object):
 		txhex = txhex[2:]
 
 		inputs = []
-		for _ in range(int(vin_count)):
+		for _ in range(int(vin_count, 16)):
 			__input = OrderedDict()
 			__input["prev_txid"] = f(txhex[:64])
 			__input["prev_vout"] = f(txhex[64:72])
@@ -603,7 +603,7 @@ class witness_tx(tx):
 		txhex = txhex[2:]
 
 		inputs = []
-		for _ in range(int(vin_count)):
+		for _ in range(int(vin_count, 16)):
 			__input = OrderedDict()
 			__input["prev_txid"] = f(txhex[:64])
 			__input["prev_vout"] = f(txhex[64:72])
@@ -653,7 +653,7 @@ class witness_tx(tx):
 
 
 		txwitness = []
-		for _ in range(int(vin_count)):
+		for _ in range(int(vin_count, 16)):
 			witness_list = []
 			witness_count = txhex[:2]
 
