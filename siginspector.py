@@ -1,15 +1,25 @@
 import ecdsa
 import re
 
-from func import dsha256, _load_key, tolittle_endian
-from opcodes import OPCODE_DICT
-from serialize import tx, witness_tx, hexlify, P2WPKHoP2SH, P2PKH
+try:
+	from func import dsha256, _load_key, tolittle_endian
+	from opcodes import OPCODE_DICT
+	from serialize import tx, witness_tx, hexlify, P2WPKHoP2SH, P2PKH
+	from sighash import SIGHASH, REV_SIGHASH
+
+except Exception as e:
+
+	from .func import dsha256, _load_key, tolittle_endian
+	from .opcodes import OPCODE_DICT
+	from .serialize import tx, witness_tx, hexlify, P2WPKHoP2SH, P2PKH
+	from .sighash import SIGHASH, REV_SIGHASH
+	
 from json import loads
 from pprint import pprint
 from collections import OrderedDict
 from ecdsa.ecdsa import int_to_string, string_to_int
-from sighash import SIGHASH
 from warnings import warn
+from hashlib import sha256
 
 decoderawtransaction = tx.decoderawtransaction
 decoderawtransaction_witness = witness_tx.decoderawtransaction
@@ -229,30 +239,6 @@ class inspector(object):
 	def deserialize_have_P2SH(self, txhex, amounts, sighashtype = "ALL"):
 		pass
 
-	def tohex(self, order_dict):
-
-		_hex = ""
-		witness = ""
-
-		for k, v in order_dict.items():
-
-			if k == "locktime":
-				break
-
-			if k in ["vin", "vout"]:
-				for x in v:
-					for kv, vv in x.items():
-						# witness is the second last
-						if kv == "txwitness":
-							witness += vv
-						else:
-							_hex += vv
-			else:
-				_hex += v
-
-		_hex = _hex + witness + order_dict.get("locktime")
-		return _hex
-
 	@classmethod
 	def check_recovery(self, pub):
 
@@ -294,9 +280,64 @@ class inspector(object):
 		return any([pkh == pubkeyhash for pkh in recover_process])
 
 	@classmethod
-	def autoverify(self, txhex):
+	def autoverify(self, txhex, amount, showfaild_only = True):
 		warn("Can verify witness part only")
-		
+
+		json = self.decodetransaction(txhex)
+
+		pos = 0
+		sigz_list = self.deserialize(txhex=txhex, amounts=amount)
+		vin_result = {}
+
+		for p,v in enumerate(json.get("vin")):
+			txw = v.get("txwitness")
+			if txw:
+				state = []
+				signature, pubkeyhash = txw[:-1], txw[-1]
+				sigz = sigz_list[pos]
+				pos += 1
+
+				for sig in signature:
+
+					if sig == "00":
+						continue
+
+					detail = {}
+					
+					for pkh in self.rev_mon(pubkeyhash):
+						empty = []
+						sighashtype = REV_SIGHASH.get(int(sig[-2:], 16))
+						sig = sig[:-2]
+
+						empty.append((pkh, self.verify(sig, pkh, sigz)))
+					
+					if not any([e[1] for e in empty]) and showfaild_only:
+						detail[sig] = empty
+						
+
+					elif not showfaild_only:
+						detail[sig] = empty
+						
+					if detail:
+						state.append(detail)
+
+			if state:
+				vin_result[p] = state
+
+		return vin_result if vin_result else "All signature verify successfully."
+
+	@classmethod
+	def rev_mon(self, script):
+
+		if len(script) == 66:
+			return [script]
+
+		if re.findall(r"^(5[1-9a-f]|60)(21(03|02)\w{64})+(5[1-9a-f]|60)ae$", script):
+			return [r[0] for r in re.findall(r"((03|02)\w{64})+", script)]
+
+		else:
+			warn("Can not decode M of N script")
+
 if __name__ == '__main__':
 	
 	# https://github.com/bitcoin/bips/blob/master/bip-0143.mediawiki#p2sh-p2wpkh
@@ -411,3 +452,9 @@ if __name__ == '__main__':
 	state10 = [ inspector.verify(signature=signaturex, pubkeyhash=pubkeyhashx, msg=ffffx) for signaturex, pubkeyhashx, ffffx in zip(signature10, pubkeyhash10, ffff10)]
 	print("tx10:",state10)
 	
+	
+	# autotest
+	txhex11 = txhex10
+	amounts = [tolittle_endian(i, 16) for i in [2999788, 3024000, 3689652, 5024078, 3623169, 4210577, 3937500, 3700221, 5030366, 3945446, 4680000]]
+	test = inspector.autoverify(txhex11, amounts)
+	print(test) # txid of witness used differet way to hash

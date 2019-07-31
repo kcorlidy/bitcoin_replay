@@ -36,11 +36,11 @@ def _load_key(key, public = False):
 def _load_tx_info(txid):
 		pass
 
-def dsha256(msg):
+def dsha256(msg, func = sha256):
 	if isinstance(msg, str):
 		msg = bytes.fromhex(msg)
 		
-	return sha256(sha256(msg).digest()).digest()
+	return func(func(msg).digest()).digest()
 
 
 if __name__ == '__main__':
