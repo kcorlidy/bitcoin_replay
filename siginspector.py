@@ -458,3 +458,5 @@ if __name__ == '__main__':
 	amounts = [tolittle_endian(i, 16) for i in [2999788, 3024000, 3689652, 5024078, 3623169, 4210577, 3937500, 3700221, 5030366, 3945446, 4680000]]
 	test = inspector.autoverify(txhex11, amounts)
 	print(test) # txid of witness used differet way to hash
+
+	# more data TODO:https://github.com/bitcoin/bitcoin/tree/master/src/test/data
